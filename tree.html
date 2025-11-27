@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Christmas Tree with Meteors</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            touch-action: none; /* 防止手机端触摸滚动 */
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #title {
+            position: absolute;
+            color: #fff;
+            font-family: 'Brush Script MT', cursive;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+            z-index: 10;
+            pointer-events: none;
+            text-align: left;
+            /* 默认 PC 端样式 */
+            top: 40%;
+            left: 10%;
+            font-size: 3rem;
+        }
+
+        .title-line {
+            line-height: 1.2;
+            display: block;
+        }
+
+        /* 2. CSS 媒体查询：适配手机竖屏 */
+        @media (max-width: 768px) {
+            #title {
+                top: 10%;          /* 移到顶部 */
+                left: 0;
+                width: 100%;       /* 占满宽度以便居中 */
+                text-align: center;/* 文字居中 */
+                font-size: 2.5rem; /* 稍微调小字体 */
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="title">
+        <div class="title-line">Merry Christmas</div>
+        <div class="title-line">Only for ZCY</div>
+    </div>
+    <div id="container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        let scene, camera, renderer;
+        let treeGroup; 
+        let baseGeometry; 
+        let baseParticlesData = []; 
+        let totalTreeHeight = 0; 
+        let starsMaterial; 
+
+        // ==========================
+        // 流星相关变量
+        // ==========================
+        let meteors = [];
+        let meteorTexture;
+        let glowTexture;
+        
+        const meteorColors = [
+            { head: 0xffffff, tail: 0x00ffff }, 
+            { head: 0xffffff, tail: 0xff69b4 }, 
+            { head: 0xffffff, tail: 0xffd700 }, 
+            { head: 0xffffff, tail: 0x87ceeb }, 
+            { head: 0xffffff, tail: 0xff6b6b }, 
+            { head: 0xffffff, tail: 0x98fb98 }, 
+            { head: 0xffffff, tail: 0xdda0dd }, 
+            { head: 0xffffff, tail: 0xf0e68c }, 
+        ];
+
+        const container = document.getElementById('container');
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.0003);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 8000);
+            
+            // 3. 初始相机位置适配
+            updateCameraPosition();
+            camera.position.y = 500; 
+            camera.lookAt(0, 400, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            // 限制像素比，防止高分屏手机发热
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            meteorTexture = createMeteorTexture();
+            glowTexture = createGlowTexture();
+
+            const particleTexture = createParticleTexture();
+            const particleMaterial = new THREE.PointsMaterial({
+                map: particleTexture,
+                size: 8, // 稍微调大一点点粒子，让填充感更强
+                blending: THREE.AdditiveBlending,
+                transparent: true,
+                opacity: 0.9,
+                vertexColors: true,
+                depthWrite: false
+            });
+
+            treeGroup = new THREE.Group();
+            scene.add(treeGroup);
+
+            const colorPalette = [
+                new THREE.Color(0xffffff), new THREE.Color(0xffe0e0),
+                new THREE.Color(0xffc0cb), new THREE.Color(0xff69b4),
+                new THREE.Color(0xff1493), new THREE.Color(0xffd700),
+                new THREE.Color(0xff0000), new THREE.Color(0xdc143c),
+                new THREE.Color(0xb22222), new THREE.Color(0xffa07a),
+                new THREE.Color(0xff7f50), new THREE.Color(0xdda0dd),
+                new THREE.Color(0xba55d3), new THREE.Color(0x9370db),
+                new THREE.Color(0xffff00), new THREE.Color(0xffefd5),
+            ];
+
+            // ==========================================
+            // A. 圣诞树主体 (修改版：增加填充，消除缝隙)
+            // ==========================================
+            const treeGeometry = new THREE.BufferGeometry();
+            const treePositions = [];
+            const treeColors = [];
+
+            const numTiers = 25; // 稍微增加层数，让树更高更密
+            const maxRadius = 380;
+            const treeBaseHeight = 50;
+            const tierStep = 35; // 稍微减小层间距，让层与层更紧凑
+
+            for (let i = 0; i < numTiers; i++) {
+                const progress = i / (numTiers - 1);
+                const currentTierY = treeBaseHeight + i * tierStep;
+                const currentBaseRadius = maxRadius * (1 - Math.pow(progress, 0.8));
+                
+                // 增加每层的粒子数量，用于填充缝隙
+                const tierParticleCount = Math.max(600, Math.floor(2500 * (1 - progress * 0.5)));
+                const branchJitterAmount = 60 * (1 - progress * 0.5) + 20;
+
+                for (let j = 0; j < tierParticleCount; j++) {
+                    const angle = (j / tierParticleCount) * Math.PI * 2;
+                    
+                    // [修改关键点 1]：增加垂直方向的随机性，使其覆盖层与层之间的空隙
+                    // tierStep 是层间距，这里乘以 1.4 意味着粒子可以上下浮动超过这一层的范围，产生重叠
+                    const yOffset = (Math.random() - 0.5) * tierStep * 1.4;
+                    const y = currentTierY + yOffset;
+                    
+                    // 原始半径计算
+                    let radiusNoise = Math.sin(angle * 7 + i) * Math.cos(angle * 13 + i * 2);
+                    radiusNoise += Math.sin(angle * 19 - i * 3) * 0.5;
+                    radiusNoise += Math.cos(angle * 5.3) * 0.3;
+                    
+                    let r = currentBaseRadius + radiusNoise * branchJitterAmount * Math.random();
+                    
+                    // [修改关键点 2]：内部填充逻辑
+                    // 30% 的粒子作为“填充物”，随机分布在内部，消除空心感
+                    if (Math.random() < 0.3) {
+                        r = r * Math.random(); // 半径随机缩小，填充内部
+                    }
+
+                    if (r < 2) r = 2;
+
+                    const x = Math.cos(angle) * r;
+                    const z = Math.sin(angle) * r;
+
+                    treePositions.push(x, y, z);
+                    const color = colorPalette[Math.floor(Math.random() * colorPalette.length)];
+                    treeColors.push(color.r, color.g, color.b);
+                }
+                totalTreeHeight = currentTierY;
+            }
+
+            treeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(treePositions, 3));
+            treeGeometry.setAttribute('color', new THREE.Float32BufferAttribute(treeColors, 3));
+            const treeMesh = new THREE.Points(treeGeometry, particleMaterial);
+            treeGroup.add(treeMesh);
+
+            // ==========================================
+            // B. 底部涟漪 
+            // ==========================================
+            baseGeometry = new THREE.BufferGeometry();
+            const basePositions = [];
+            const baseColors = [];
+            
+            const isMobile = window.innerWidth < 768;
+            const baseParticleCount = isMobile ? 15000 : 30000;
+
+            for (let i = 0; i < baseParticleCount; i++) {
+                basePositions.push(0, 0, 0);
+                const color = colorPalette[Math.floor(Math.random() * 3)];
+                baseColors.push(color.r, color.g, color.b);
+                baseParticlesData.push({
+                    angle: Math.random() * Math.PI * 2,
+                    radius: Math.random() * 800,
+                    speed: 0.5 + Math.random() * 0.8,   
+                    yOffset: Math.random() * 10 - 5
+                });
+            }
+            baseGeometry.setAttribute('position', new THREE.Float32BufferAttribute(basePositions, 3));
+            baseGeometry.setAttribute('color', new THREE.Float32BufferAttribute(baseColors, 3));
+            const baseMesh = new THREE.Points(baseGeometry, particleMaterial);
+            baseMesh.position.y = -20; 
+            treeGroup.add(baseMesh);
+
+            // ==========================================
+            // C. 顶部装饰 (爱心)
+            // ==========================================
+            const heartShape = new THREE.Shape();
+            const hx = 0, hy = 0;
+            heartShape.moveTo( hx + 5, hy + 5 );
+            heartShape.bezierCurveTo( hx + 5, hy + 5, hx + 4, hy, hx, hy );
+            heartShape.bezierCurveTo( hx - 6, hy, hx - 6, hy + 7,hx - 6, hy + 7 );
+            heartShape.bezierCurveTo( hx - 6, hy + 11, hx - 3, hy + 15.4, hx + 5, hy + 19 );
+            heartShape.bezierCurveTo( hx + 12, hy + 15.4, hx + 16, hy + 11, hx + 16, hy + 7 );
+            heartShape.bezierCurveTo( hx + 16, hy + 7, hx + 16, hy, hx + 10, hy );
+            heartShape.bezierCurveTo( hx + 7, hy, hx + 5, hy + 5, hx + 5, hy + 5 );
+
+            const extrudeSettings = { depth: 2, bevelEnabled: true, bevelSegments: 2, steps: 2, bevelSize: 1, bevelThickness: 1 };
+            const heartGeometry = new THREE.ExtrudeGeometry( heartShape, extrudeSettings );
+            heartGeometry.translate(-5, -10, 0); 
+            heartGeometry.scale(2, 2, 2);
+
+            const heartMaterial = new THREE.MeshBasicMaterial( { color: 0xff69b4 } );
+            const heartMesh = new THREE.Mesh( heartGeometry, heartMaterial ) ;
+            heartMesh.position.y = totalTreeHeight + 30;
+            heartMesh.rotation.z = 0;
+            heartMesh.rotation.x = Math.PI;
+            
+            const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: particleTexture, 
+                color: 0xff1493, 
+                blending: THREE.AdditiveBlending,
+                opacity: 0.6
+            }));
+            glowSprite.scale.set(120, 120, 1.0);
+            glowSprite.position.y = totalTreeHeight + 30;
+
+            treeGroup.add(heartMesh);
+            treeGroup.add(glowSprite);
+
+            // ==========================================
+            // D. 背景呼吸星空
+            // ==========================================
+            const starsCount = 20000; 
+            const starsGeo = new THREE.BufferGeometry();
+            const starsPos = [];
+            const starsScales = []; 
+            const starsPhases = []; 
+
+            for(let i = 0; i < starsCount; i++) {
+                const x = Math.random() * 6000 - 3000;
+                const y = Math.random() * 6000 - 3000;
+                const z = Math.random() * 6000 - 3000;
+                starsPos.push(x, y, z);
+                starsScales.push(10.0 + Math.random() * 20.0);
+                starsPhases.push(Math.random() * Math.PI * 2);
+            }
+
+            starsGeo.setAttribute('position', new THREE.Float32BufferAttribute(starsPos, 3));
+            starsGeo.setAttribute('aScale', new THREE.Float32BufferAttribute(starsScales, 1));
+            starsGeo.setAttribute('aPhase', new THREE.Float32BufferAttribute(starsPhases, 1));
+
+            starsMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    color: { value: new THREE.Color(0xffffff) } 
+                },
+                vertexShader: `
+                    attribute float aScale;
+                    attribute float aPhase;
+                    varying float vAlpha;
+                    uniform float uTime;
+                    void main() {
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        gl_Position = projectionMatrix * mvPosition;
+                        gl_PointSize = aScale * (300.0 / -mvPosition.z);
+                        float breath = sin(uTime * 1.5 + aPhase); 
+                        vAlpha = 0.5 + 0.3 * breath; 
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 color;
+                    varying float vAlpha;
+                    void main() {
+                        vec2 coord = gl_PointCoord - vec2(0.5);
+                        float dist = length(coord);
+                        if (dist > 0.5) discard;
+                        float glow = 1.0 - (dist * 2.0); 
+                        glow = pow(glow, 1.5); 
+                        gl_FragColor = vec4(color, vAlpha * glow);
+                    }
+                `,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+
+            const starField = new THREE.Points(starsGeo, starsMaterial);
+            scene.add(starField);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createMeteorTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            
+            const grd = ctx.createLinearGradient(0, 16, 256, 16);
+            grd.addColorStop(0, 'rgba(255,255,255,0)');
+            grd.addColorStop(0.3, 'rgba(255,255,255,0.3)');
+            grd.addColorStop(0.7, 'rgba(255,255,255,0.8)');
+            grd.addColorStop(1, 'rgba(255,255,255,1)');
+            
+            ctx.fillStyle = grd;
+            ctx.fillRect(0, 0, 256, 32);
+            
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createGlowTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            
+            const grd = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+            grd.addColorStop(0, 'rgba(255,255,255,1)');
+            grd.addColorStop(0.1, 'rgba(255,255,255,0.8)');
+            grd.addColorStop(0.3, 'rgba(255,255,255,0.4)');
+            grd.addColorStop(0.6, 'rgba(255,255,255,0.1)');
+            grd.addColorStop(1, 'rgba(255,255,255,0)');
+            
+            ctx.fillStyle = grd;
+            ctx.fillRect(0, 0, 128, 128);
+            
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createMeteor() {
+            const direction = Math.random() > 0.5 ? 1 : -1;
+            
+            const startX = direction * -2500;
+            const startY = Math.random() * 800 + 400;
+            const startZ = (Math.random() - 0.5) * 1500 - 500;
+            
+            const speed = 8 + Math.random() * 12;
+            const velocity = new THREE.Vector3(
+                direction * speed,
+                -speed * 0.15,
+                (Math.random() - 0.5) * 2
+            );
+
+            const colorScheme = meteorColors[Math.floor(Math.random() * meteorColors.length)];
+            const headColor = new THREE.Color(colorScheme.head);
+            const tailColor = new THREE.Color(colorScheme.tail);
+
+            const tailLength = 80 + Math.floor(Math.random() * 40);
+            
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(tailLength * 3);
+            const colors = new Float32Array(tailLength * 3);
+            const sizes = new Float32Array(tailLength);
+            const alphas = new Float32Array(tailLength);
+
+            for (let i = 0; i < tailLength; i++) {
+                positions[i * 3] = startX;
+                positions[i * 3 + 1] = startY;
+                positions[i * 3 + 2] = startZ;
+                
+                const t = i / tailLength;
+                const color = headColor.clone().lerp(tailColor, t);
+                colors[i * 3] = color.r;
+                colors[i * 3 + 1] = color.g;
+                colors[i * 3 + 2] = color.b;
+                
+                sizes[i] = Math.max(2, (1 - t * t) * 15);
+                alphas[i] = Math.pow(1 - t, 1.5);
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            geometry.setAttribute('alpha', new THREE.BufferAttribute(alphas, 1));
+
+            const material = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uTexture: { value: glowTexture }
+                },
+                vertexShader: `
+                    attribute float size;
+                    attribute float alpha;
+                    varying vec3 vColor;
+                    varying float vAlpha;
+                    uniform float uTime;
+                    
+                    void main() {
+                        vColor = color;
+                        vAlpha = alpha;
+                        
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        gl_Position = projectionMatrix * mvPosition;
+                        
+                        float flicker = 0.8 + 0.2 * sin(uTime * 10.0 + position.x * 0.1);
+                        gl_PointSize = size * flicker * (400.0 / -mvPosition.z);
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D uTexture;
+                    varying vec3 vColor;
+                    varying float vAlpha;
+                    
+                    void main() {
+                        vec2 coord = gl_PointCoord - vec2(0.5);
+                        float dist = length(coord);
+                        if (dist > 0.5) discard;
+                        
+                        float glow = 1.0 - dist * 2.0;
+                        glow = pow(glow, 2.0);
+                        
+                        vec3 finalColor = vColor * (1.0 + glow * 0.5);
+                        gl_FragColor = vec4(finalColor, vAlpha * glow);
+                    }
+                `,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                vertexColors: true
+            });
+
+            const tailMesh = new THREE.Points(geometry, material);
+            scene.add(tailMesh);
+
+            const headGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: glowTexture,
+                color: headColor,
+                blending: THREE.AdditiveBlending,
+                transparent: true,
+                opacity: 1.0
+            }));
+            headGlow.scale.set(60, 60, 1);
+            headGlow.position.set(startX, startY, startZ);
+            scene.add(headGlow);
+
+            const haloGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: glowTexture,
+                color: tailColor,
+                blending: THREE.AdditiveBlending,
+                transparent: true,
+                opacity: 0.5
+            }));
+            haloGlow.scale.set(100, 100, 1);
+            haloGlow.position.set(startX, startY, startZ);
+            scene.add(haloGlow);
+
+            meteors.push({
+                tailMesh: tailMesh,
+                headGlow: headGlow,
+                haloGlow: haloGlow,
+                velocity: velocity,
+                tailLength: tailLength,
+                headPosition: new THREE.Vector3(startX, startY, startZ),
+                positions: positions,
+                life: 1.0,
+                decay: 0.001 + Math.random() * 0.001,
+                time: 0,
+                direction: direction
+            });
+        }
+
+        function createParticleTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+            const grd = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+            grd.addColorStop(0, 'rgba(255,255,255,1)');
+            grd.addColorStop(0.4, 'rgba(255,255,255,0.3)');
+            grd.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grd;
+            ctx.fillRect(0,0,32,32);
+            return new THREE.CanvasTexture(canvas);
+        }
+        
+        function updateCameraPosition() {
+            const aspect = window.innerWidth / window.innerHeight;
+            if (aspect < 1) {
+                // 竖屏模式
+                camera.position.z = 1600; 
+            } else {
+                // 横屏模式
+                camera.position.z = 900;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            updateCameraPosition();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (starsMaterial) {
+                starsMaterial.uniforms.uTime.value += 0.015;
+            }
+
+            if (Math.random() < 0.008) {
+                createMeteor();
+            }
+
+            for (let i = meteors.length - 1; i >= 0; i--) {
+                const meteor = meteors[i];
+                meteor.time += 0.016;
+                
+                meteor.tailMesh.material.uniforms.uTime.value = meteor.time;
+                meteor.headPosition.add(meteor.velocity);
+                
+                const positions = meteor.tailMesh.geometry.attributes.position.array;
+                
+                for (let j = meteor.tailLength - 1; j > 0; j--) {
+                    positions[j * 3] = positions[(j - 1) * 3];
+                    positions[j * 3 + 1] = positions[(j - 1) * 3 + 1];
+                    positions[j * 3 + 2] = positions[(j - 1) * 3 + 2];
+                }
+                
+                positions[0] = meteor.headPosition.x;
+                positions[1] = meteor.headPosition.y;
+                positions[2] = meteor.headPosition.z;
+                
+                meteor.tailMesh.geometry.attributes.position.needsUpdate = true;
+                
+                meteor.headGlow.position.copy(meteor.headPosition);
+                meteor.haloGlow.position.copy(meteor.headPosition);
+                
+                const pulse = 1 + Math.sin(meteor.time * 5) * 0.2;
+                meteor.headGlow.scale.set(60 * pulse, 60 * pulse, 1);
+                meteor.haloGlow.scale.set(100 * pulse, 100 * pulse, 1);
+                
+                meteor.life -= meteor.decay;
+                meteor.headGlow.material.opacity = meteor.life;
+                meteor.haloGlow.material.opacity = meteor.life * 0.5;
+                
+                const outOfBounds = Math.abs(meteor.headPosition.x) > 3000 || 
+                                    meteor.headPosition.y < -500;
+                
+                if (meteor.life <= 0 || outOfBounds) {
+                    scene.remove(meteor.tailMesh);
+                    scene.remove(meteor.headGlow);
+                    scene.remove(meteor.haloGlow);
+                    meteor.tailMesh.geometry.dispose();
+                    meteor.tailMesh.material.dispose();
+                    meteor.headGlow.material.dispose();
+                    meteor.haloGlow.material.dispose();
+                    meteors.splice(i, 1);
+                }
+            }
+
+            const positions = baseGeometry.attributes.position.array;
+            for (let i = 0; i < baseParticlesData.length; i++) {
+                const data = baseParticlesData[i];
+                data.radius += data.speed;
+                if (data.radius > 800) { 
+                    data.radius = 0;
+                }
+                const rippleRadius = data.radius + Math.sin(data.radius * 0.06) * 25;
+                const x = Math.cos(data.angle) * rippleRadius;
+                const z = Math.sin(data.angle) * rippleRadius;
+                const y = Math.sin(data.radius * 0.06) * 6 + data.yOffset;
+
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = z;
+            }
+            baseGeometry.attributes.position.needsUpdate = true;
+
+            treeGroup.rotation.y -= 0.002;
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
