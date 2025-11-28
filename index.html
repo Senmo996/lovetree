@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>国考上岸预测器</title>
+    <style>
+        /* 全局重置与基础样式 */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f5f7fa;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: #333;
+            overflow: hidden; /* 防止烟花撑出滚动条 */
+        }
+
+        /* 烟花画布：覆盖全屏，不可点击 */
+        #fireworks-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 999; /* 在最顶层 */
+            pointer-events: none; /* 让鼠标事件穿透，不影响下方按钮点击 */
+        }
+
+        /* 主容器卡片 */
+        .container {
+            width: 90%;
+            max-width: 400px;
+            background: #ffffff;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            padding: 30px 20px;
+            text-align: center;
+            position: relative;
+            z-index: 10; /* 保证内容在背景之上 */
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 25px;
+            color: #d93025;
+            font-weight: bold;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 12px 10px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            font-size: 16px;
+            outline: none;
+            background-color: #fdfdfd;
+            appearance: none;
+            -webkit-appearance: none;
+        }
+
+        input:focus, select:focus {
+            border-color: #d93025;
+            background-color: #fff;
+        }
+
+        .date-row {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .select-wrapper {
+            position: relative;
+            flex: 1;
+        }
+
+        .select-wrapper::after {
+            content: "▼";
+            font-size: 10px;
+            color: #999;
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+        }
+
+        .btn-predict {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #ff6b6b, #d93025);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 15px;
+            box-shadow: 0 4px 10px rgba(217, 48, 37, 0.3);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .btn-predict:active {
+            transform: scale(0.98);
+        }
+
+        .progress-container {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .progress-label {
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 12px;
+            background-color: #eee;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #ff9a9e 0%, #d93025 100%);
+            border-radius: 6px;
+        }
+
+        .result-container {
+            display: none;
+            margin-top: 20px;
+            animation: fadeIn 0.8s ease;
+        }
+
+        .result-text {
+            font-size: 19px;
+            line-height: 1.6;
+            color: #333;
+            font-weight: bold;
+        }
+
+        .highlight {
+            color: #d93025;
+            font-size: 24px;
+            display: inline-block;
+            margin: 0 2px;
+        }
+
+        .exam-info {
+            color: #555;
+            font-weight: normal;
+        }
+
+        .success-icon {
+            font-size: 60px;
+            margin-bottom: 15px;
+            display: block;
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .btn-reset {
+            margin-top: 30px;
+            background: rgba(255, 255, 255, 0.9); /* 半透明背景，防止烟花太花看不清按钮 */
+            border: 1px solid #ccc;
+            color: #666;
+            padding: 8px 25px;
+            border-radius: 20px;
+            font-size: 14px;
+            cursor: pointer;
+            position: relative; /* 配合 z-index */
+            z-index: 20;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes popIn {
+            from { transform: scale(0); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+    </style>
+</head>
+<body>
+
+<canvas id="fireworks-canvas"></canvas>
+
+<div class="container">
+    <div id="input-section">
+        <h1>🎓 国考上岸预测器</h1>
+        
+        <div class="form-group">
+            <label for="username">姓名</label>
+            <input type="text" id="username" placeholder="请输入你的名字">
+        </div>
+        
+        <div class="form-group">
+            <label>考试时间</label>
+            <div class="date-row">
+                <div class="select-wrapper">
+                    <select id="sel-year"><option value="" disabled selected>年</option></select>
+                </div>
+                <div class="select-wrapper">
+                    <select id="sel-month"><option value="" disabled selected>月</option></select>
+                </div>
+                <div class="select-wrapper">
+                    <select id="sel-day"><option value="" disabled selected>日</option></select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label for="exam-loc">考试地点</label>
+            <input type="text" id="exam-loc" placeholder="例如：北京 / 某某中学">
+        </div>
+
+        <button class="btn-predict" onclick="startPrediction()">开始预测</button>
+    </div>
+
+    <div id="progress-section" class="progress-container">
+        <div class="progress-label" id="progress-text">正在初始化... 0%</div>
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="progress-fill"></div>
+        </div>
+    </div>
+
+    <div id="result-section" class="result-container">
+        <span class="success-icon">🎉</span>
+        <div class="result-text" id="result-content"></div>
+        <button class="btn-reset" onclick="resetPage()">再测一次</button>
+    </div>
+</div>
+
+<script>
+    // --- 页面初始化逻辑 ---
+    window.onload = function() {
+        initDateSelectors();
+        initFireworks(); // 初始化Canvas尺寸
+    };
+
+    window.onresize = function() {
+        initFireworks(); // 窗口大小改变时重置Canvas
+    };
+
+    function initDateSelectors() {
+        const yearSel = document.getElementById('sel-year');
+        const monthSel = document.getElementById('sel-month');
+        const daySel = document.getElementById('sel-day');
+        const currentYear = new Date().getFullYear();
+
+        for (let i = 0; i < 4; i++) {
+            let y = currentYear + i;
+            let opt = document.createElement('option');
+            opt.value = y + '年';
+            opt.innerHTML = y;
+            yearSel.appendChild(opt);
+        }
+        for (let i = 1; i <= 12; i++) {
+            let opt = document.createElement('option');
+            opt.value = i + '月';
+            opt.innerHTML = i + '月';
+            monthSel.appendChild(opt);
+        }
+        for (let i = 1; i <= 31; i++) {
+            let opt = document.createElement('option');
+            opt.value = i + '日';
+            opt.innerHTML = i + '日';
+            daySel.appendChild(opt);
+        }
+    }
+
+    // --- 预测逻辑 ---
+    function startPrediction() {
+        const name = document.getElementById('username').value.trim();
+        const loc = document.getElementById('exam-loc').value.trim();
+        const year = document.getElementById('sel-year').value;
+        const month = document.getElementById('sel-month').value;
+        const day = document.getElementById('sel-day').value;
+
+        if (!name) { alert("请输入您的姓名！"); return; }
+        if (!year || !month || !day) { alert("请完整选择考试的年、月、日！"); return; }
+        if (!loc) { alert("请输入考试地点！"); return; }
+
+        const fullTime = year + month + day;
+
+        document.getElementById('input-section').style.display = 'none';
+        document.getElementById('progress-section').style.display = 'block';
+
+        let progress = 0;
+        const progressBar = document.getElementById('progress-fill');
+        const progressText = document.getElementById('progress-text');
+        
+        const timer = setInterval(() => {
+            const increment = Math.random() * 1.5 + 0.2; 
+            progress += increment;
+            
+            if (progress >= 100) {
+                progress = 100;
+                clearInterval(timer);
+                setTimeout(() => {
+                    showResult(name, fullTime, loc);
+                }, 800); 
+            }
+
+            progressBar.style.width = progress + '%';
+            
+            if(progress < 25) {
+                progressText.innerText = `正在连接考试运势数据库... ${Math.floor(progress)}%`;
+            } else if (progress < 50) {
+                progressText.innerText = `正在分析你的申论/行测实力... ${Math.floor(progress)}%`;
+            } else if (progress < 85) {
+                progressText.innerText = `正在计算岗位竞争比与胜率... ${Math.floor(progress)}%`;
+            } else {
+                progressText.innerText = `生成最终预测报告... ${Math.floor(progress)}%`;
+            }
+
+        }, 80); 
+    }
+
+    function showResult(name, time, loc) {
+        document.getElementById('progress-section').style.display = 'none';
+        const resultSection = document.getElementById('result-section');
+        const resultContent = document.getElementById('result-content');
+
+        resultContent.innerHTML = `
+            <span class="highlight">${name}</span><br>
+            将在 <span class="exam-info">${time}</span> 的<br>
+            <span class="exam-info">${loc}</span> 考试中<br>
+            <span class="highlight" style="font-size: 26px; margin-top:12px; display:block;">成功上岸！</span>
+        `;
+
+        resultSection.style.display = 'block';
+
+        // 触发烟花
+        startFireworks();
+    }
+
+    function resetPage() {
+        document.getElementById('result-section').style.display = 'none';
+        document.getElementById('progress-section').style.display = 'none';
+        document.getElementById('input-section').style.display = 'block';
+        document.getElementById('progress-fill').style.width = '0%';
+        
+        // 停止烟花
+        stopFireworks();
+    }
+
+    // --- 烟花特效逻辑 (Canvas) ---
+    const canvas = document.getElementById('fireworks-canvas');
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+    let animationId;
+    let isFireworksActive = false;
+
+    function initFireworks() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+
+    // 粒子类
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            this.color = color;
+            // 随机速度和角度
+            const angle = Math.random() * Math.PI * 2;
+            const velocity = Math.random() * 4 + 1; // 爆炸范围
+            this.vx = Math.cos(angle) * velocity;
+            this.vy = Math.sin(angle) * velocity;
+            this.alpha = 1; // 透明度
+            this.decay = Math.random() * 0.015 + 0.005; // 消失速度
+        }
+
+        draw() {
+            ctx.save();
+            ctx.globalAlpha = this.alpha;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+            ctx.restore();
+        }
+
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.vy += 0.05; // 重力模拟
+            this.vx *= 0.98; // 摩擦力
+            this.vy *= 0.98;
+            this.alpha -= this.decay;
+        }
+    }
+
+    function createExplosion() {
+        const x = Math.random() * canvas.width;
+        // 让爆炸主要发生在屏幕上半部分，避免遮挡文字太多
+        const y = Math.random() * (canvas.height * 0.6); 
+        const colors = ['#ff4d4d', '#ff9f43', '#feca57', '#54a0ff', '#5f27cd', '#d93025'];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+
+        for (let i = 0; i < 30; i++) { // 每个烟花30个粒子
+            particles.push(new Particle(x, y, color));
+        }
+    }
+
+    function animateFireworks() {
+        if (!isFireworksActive) return;
+
+        // 每一帧清除画布，保留一点拖尾效果（可选，这里用全清）
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 随机产生新的烟花 (概率控制频率)
+        if (Math.random() < 0.05) { 
+            createExplosion();
+        }
+
+        // 更新和绘制所有粒子
+        for (let i = particles.length - 1; i >= 0; i--) {
+            particles[i].update();
+            particles[i].draw();
+
+            // 移除消失的粒子
+            if (particles[i].alpha <= 0) {
+                particles.splice(i, 1);
+            }
+        }
+
+        animationId = requestAnimationFrame(animateFireworks);
+    }
+
+    function startFireworks() {
+        if (isFireworksActive) return;
+        isFireworksActive = true;
+        // 立即产生几个爆炸作为开场
+        createExplosion();
+        createExplosion();
+        createExplosion();
+        animateFireworks();
+    }
+
+    function stopFireworks() {
+        isFireworksActive = false;
+        cancelAnimationFrame(animationId);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particles = [];
+    }
+</script>
+
+</body>
+</html>
